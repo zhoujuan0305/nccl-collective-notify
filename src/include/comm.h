@@ -18,6 +18,7 @@
 #include "register.h"
 #include "graph.h"
 #include "profiler.h"
+#include "collective_notify.h"
 #include "allocator.h"
 #include "dev_runtime.h"
 #include "sym_kernels.h"
@@ -229,6 +230,8 @@ struct ncclTaskColl {
   void* collApiEventHandle;
   void* eventHandle;
   uint8_t nChannels;
+  uint64_t collectiveId;
+  uint8_t notifySent;
 };
 
 
@@ -511,6 +514,11 @@ typedef enum ncclGroupTaskType {
 
 struct ncclCommSymTeams;
 
+struct ncclCollectiveNotifier {
+  int fd;
+  char path[108];
+};
+
 // NCCL_CHECK_MODE=DEBUG_LOCAL/DEBUG_GLOBAL
 // ncclCheckModeDebugLocal : check the input args/pointers locally, it replaces ncclParamCheckPointers()
 // ncclCheckModeDebugGlobal : check the input args globally such as symmetric buffer check, etc.
@@ -605,6 +613,8 @@ struct ncclComm {
   uint64_t opCount;
   // Collective operation counter
   uint64_t collOpCount;
+  uint64_t collectiveNotifySeq;
+  struct ncclCollectiveNotifier notifier;
 
   // Channels for collectives
   int nChannels; // connection nChannels

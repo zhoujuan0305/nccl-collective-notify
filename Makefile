@@ -7,12 +7,13 @@
 .PHONY: all clean
 
 default: src.build
+default: agent.build
 default: ir.build
 
-install: src.install
+install: src.install agent.install
 BUILDDIR ?= $(abspath ./build)
 ABSBUILDDIR := $(abspath $(BUILDDIR))
-TARGETS := src pkg nccl4py ir
+TARGETS := src agent pkg nccl4py ir
 clean: ${TARGETS:%=%.clean}
 examples.build: src.build
 ir.build: src.build
@@ -27,6 +28,9 @@ ${BUILDDIR}/%.txt: %.txt
 
 src.%:
 	${MAKE} -C src $* BUILDDIR=${ABSBUILDDIR}
+
+agent.%:
+	${MAKE} -C agent $* BUILDDIR=${ABSBUILDDIR}
 
 examples: src.build
 	${MAKE} -C docs/examples NCCL_HOME=${ABSBUILDDIR}

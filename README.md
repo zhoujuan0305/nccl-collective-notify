@@ -1,76 +1,158 @@
-# NCCL
+# nccl-collective-notify
 
-Optimized primitives for inter-GPU communication.
+中文 | [English](README.en.md)
 
-## Introduction
+## 项目简介
 
-NCCL (pronounced "Nickel") is a stand-alone library of standard communication routines for GPUs, implementing all-reduce, all-gather, reduce, broadcast, reduce-scatter, as well as any send/receive based communication pattern. It has been optimized to achieve high bandwidth on platforms using PCIe, NVLink, NVswitch, as well as networking using InfiniBand Verbs or TCP/IP sockets. NCCL supports an arbitrary number of GPUs installed in a single node or across multiple nodes, and can be used in either single- or multi-process (e.g., MPI) applications.
+`nccl-collective-notify` 是一个基于原始 NCCL 的最小改造版本，用来在 host 侧为 collective 生成通知事件，并通过本地 agent 转发到远端 UDP server。
 
-For more information on NCCL usage, please refer to the [NCCL documentation](https://docs.nvidia.com/deeplearning/sdk/nccl-developer-guide/index.html).
+它实现的是一条很轻量的链路：
 
-## Build
-
-Note: the official and tested builds of NCCL can be downloaded from: https://developer.nvidia.com/nccl. You can skip the following build steps if you choose to use the official builds.
-
-To build the library :
-
-```shell
-$ cd nccl
-$ make -j src.build
+```text
+NCCL rank 0
+  -> AF_UNIX datagram socket
+  -> local nccl-agent
+  -> UDP
+  -> remote server
 ```
 
-If CUDA is not installed in the default /usr/local/cuda path, you can define the CUDA path with :
+当前默认路径和目标是：
+- 本地 socket: `/tmp/nccl-agent.sock`
+- 远端 server: `<remote-host-url>:<remote-port>`
 
-```shell
-$ make src.build CUDA_HOME=<path to cuda install>
+## 实现思路
+
+- 在 `ncclComm` 上增加 communicator 级别的 `collectiveNotifySeq` 和 `notifier`
+- 在 `ncclTaskColl` 上增加 `collectiveId` 和 `notifySent`
+- 在所有 `ncclTaskColl` 创建路径里分配 `collectiveId = ++comm->collectiveNotifySeq`
+- 在 `hostStreamPlanTask()` 中，仅 `rank == 0` 且 `notifySent == false` 时发送一次本地通知
+- 本地通知使用 `AF_UNIX + SOCK_DGRAM + nonblocking`
+- agent 监听本地 UDS，收到后转发到远端 UDP server
+
+## 构建
+
+### 构建NCCL
+
+最简单的构建方式：
+
+```bash
+make -j src.build
 ```
 
-NCCL will be compiled and installed in `build/` unless `BUILDDIR` is set.
+默认输出目录是 `build/`。
 
-By default, NCCL is compiled for all supported architectures. To accelerate the compilation and reduce the binary size, consider redefining `NVCC_GENCODE` (defined in `makefiles/common.mk`) to only include the architecture of the target platform :
-```shell
-$ make -j src.build NVCC_GENCODE="-gencode=arch=compute_90,code=sm_90"
+如果 CUDA 不在 `/usr/local/cuda`，可以这样指定：
+
+```bash
+make -j src.build CUDA_HOME=/path/to/cuda
 ```
 
-## Install
+### 构建Agent
 
-To install NCCL on the system, create a package then install it as root.
 
-Debian/Ubuntu :
-```shell
-$ # Install tools to create debian packages
-$ sudo apt install build-essential devscripts debhelper fakeroot
-$ # Build NCCL deb package
-$ make pkg.debian.build
-$ ls build/pkg/deb/
+```bash
+make -C agent build
 ```
 
-RedHat/CentOS :
-```shell
-$ # Install tools to create rpm packages
-$ sudo yum install rpm-build rpmdevtools
-$ # Build NCCL rpm package
-$ make pkg.redhat.build
-$ ls build/pkg/rpm/
+默认会生成：
+
+```bash
+build/bin/nccl-agent
 ```
 
-OS-agnostic tarball :
-```shell
-$ make pkg.txz.build
-$ ls build/pkg/txz/
+如果你想在编译时指定远端 server：
+
+```bash
+make -C agent build AGENT_REMOTE_HOST=<remote-host-url> AGENT_REMOTE_PORT=<remote-port>
 ```
 
-## Tests
+也支持 CMake，变量名分别是：
+- `NCCL_AGENT_REMOTE_HOST`
+- `NCCL_AGENT_REMOTE_PORT`
 
-Tests for NCCL are maintained separately at https://github.com/nvidia/nccl-tests.
+## 使用示例
 
-```shell
-$ git clone https://github.com/NVIDIA/nccl-tests.git
-$ cd nccl-tests
-$ make
-$ ./build/all_reduce_perf -b 8 -e 256M -f 2 -g <ngpus>
+### 1. 启动receiver
+
+运行最小接收端：
+
+```bash
+python3 agent/server.py --host 0.0.0.0 --port <listen-port>
 ```
 
-## Copyright
+### 2. 启动Agent
 
-All source code and accompanying documentation is copyright (c) 2015-2020, NVIDIA CORPORATION. All rights reserved.
+如果是本机闭环验证，推荐让 agent 发往本机：
+
+```bash
+make -C agent build BUILDDIR=/tmp/nccl-agent-build AGENT_REMOTE_HOST=<remote-host-url> AGENT_REMOTE_PORT=<remote-port>
+/tmp/nccl-agent-build/bin/nccl-agent
+```
+
+
+
+### 编译nccl-tests
+
+
+```bash
+git clone https://github.com/NVIDIA/nccl-tests.git
+cd nccl-tests
+make -j MPI=1 MPI_HOME=<path-to-mpi> NCCL_HOME=<path-to-this-repo>/build
+```
+
+
+### 运行nccl-tests测试
+
+```bash
+./build/all_reduce_perf -b 1M -e 1M -f 2 -g 2 -n 5
+```
+理论上应该在服务端看到15次相应的消息通知
+
+
+## agent侧部署到systemd
+
+仓库里提供了一个部署脚本：
+
+[agent/install_systemd.sh](/data/zhiyuanzhou/nccl/agent/install_systemd.sh:1)
+
+它会：
+- 按你指定的 server host 和 port 重新编译 agent
+- 安装二进制到默认 `/usr/local/bin/nccl-agent`
+- 安装 `systemd` service
+- 执行 `daemon-reload`
+- 启用并重启服务
+
+最简单的部署方式：
+
+```bash
+sudo bash agent/install_systemd.sh
+```
+
+指定远端 server：
+
+```bash
+sudo bash agent/install_systemd.sh --server-host <remote-host-url> --server-port <remote-port>
+```
+
+自定义服务名和安装路径：
+
+```bash
+sudo bash agent/install_systemd.sh \
+  --server-host <remote-host-url> \
+  --server-port <remote-port> \
+  --service-name nccl-agent-custom \
+  --install-bin /usr/local/bin/nccl-agent-custom
+```
+
+
+## License 与致谢
+本仓库是基于 NVIDIA NCCL 的修改而来，属于其衍生项目。
+
+请同时阅读以下文件：
+- [LICENSE.txt](LICENSE.txt)
+- [ThirdPartyNotices.txt](ThirdPartyNotices.txt)
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+
+仓库中保留了上游 NCCL 的原始版权声明、SPDX 标记和第三方归属说明。
+
+如果你分发本仓库或继续在其基础上修改并公开发布，请保留上游许可证与归属信息，并明确标注你的修改内容。

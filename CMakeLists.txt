@@ -270,6 +270,9 @@ if(NCCL_OS_LINUX)
 endif()
 
 add_subdirectory(src)
+if(NCCL_OS_LINUX)
+  add_subdirectory(agent)
+endif()
 
 # Add package building subdirectories
 if(BUILD_DEBIAN_PACKAGE OR BUILD_PACKAGES)

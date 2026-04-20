@@ -6,6 +6,7 @@ set(MISC_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/param.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/utils.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/shmutils.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/collective_notify.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/nvmlwrap.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/argcheck.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/gdrwrap.cc

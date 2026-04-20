@@ -38,6 +38,7 @@
 #include "os.h"
 #include "env.h"
 #include "rma/rma.h"
+#include "notify.h"
 
 #define STR2(v) #v
 #define STR(v) STR2(v)
@@ -268,6 +269,8 @@ static ncclResult_t commFree(ncclComm_t comm) {
   /* commFree() should not involve any sync among ranks. */
   if (comm == NULL)
     return ncclSuccess;
+
+  ncclCollectiveNotifierClose(comm);
 
   NCCLCHECK(ncclCeFinalize(comm));
   NCCLCHECK(ncclRmaCeFinalize(comm));
@@ -560,6 +563,7 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   } while (0);
 
   ncclIntruQueueConstruct(&comm->eventCallbackQueue);
+  NCCLCHECK(ncclCollectiveNotifierInit(comm));
 
   return ncclSuccess;
 }
@@ -3314,4 +3318,3 @@ ncclResult_t ncclCommUserRank(const ncclComm_t comm, int* rank) {
   *rank = comm->rank;
   return ncclSuccess;
 }
-

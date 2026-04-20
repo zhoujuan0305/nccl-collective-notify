@@ -20,6 +20,7 @@
 #include "scheduler.h"
 #include "compiler.h"
 #include "rma/rma.h"
+#include "notify.h"
 
 #include <cstring> // std::memcpy
 #include <cinttypes> // PRIx64
@@ -377,6 +378,8 @@ ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool
       t->trafficBytes = t->count*ncclFuncTrafficPerByte(t->func, comm->nRanks);
       t->chunkSteps = BROADCAST_CHUNKSTEPS;
       t->sliceSteps = BROADCAST_SLICESTEPS;
+      t->collectiveId = ++comm->collectiveNotifySeq;
+      t->notifySent = 0;
       ncclTaskCollSorterInsert(&planner->collSorter, t, t->trafficBytes);
       planner->nTasksColl += 1;
       ncclMemoryPoolFree(&comm->memPool_ncclTaskBcast, bcastTask);
@@ -1398,6 +1401,16 @@ static ncclResult_t hostStreamPlanTask(struct ncclComm* comm, struct ncclKernelP
   }
   NCCLCHECK(ncclProfilerStopTaskEvents(plan));
   NCCLCHECK(ncclProfilerStopGroupEvent(plan));
+  if (comm->rank == 0) {
+    struct ncclTaskColl* task = ncclIntruQueueHead(&plan->collTaskQueue);
+    while (task != nullptr) {
+      if (!task->notifySent) {
+        ncclCollectiveNotifierSend(comm, task->collectiveId);
+        task->notifySent = 1;
+      }
+      task = task->next;
+    }
+  }
   if (!plan->persistent) {
     // Notify main thread of our reclaiming. This will reclaim plan concurrently.
     ncclIntruQueueMpscEnqueue(&comm->callbackQueue, &plan->reclaimer);
@@ -2636,6 +2649,8 @@ static ncclResult_t collTaskAppend(
   t->eActivationMask = ncclProfilerApiState.eActivationMask;
   t->groupApiEventHandle = ncclProfilerApiState.groupApiEventHandle;
   t->collApiEventHandle = ncclProfilerApiState.collApiEventHandle;
+  t->collectiveId = ++comm->collectiveNotifySeq;
+  t->notifySent = 0;
 
   planner->nTasksColl += 1;
   ncclTaskCollSorterInsert(&planner->collSorter, t, t->trafficBytes);
@@ -2694,6 +2709,8 @@ static ncclResult_t ceCollTaskAppend(
   t->collApiEventHandle = ncclProfilerApiState.collApiEventHandle;
   t->sendWin = sendWin;
   t->recvWin = recvWin;
+  t->collectiveId = ++comm->collectiveNotifySeq;
+  t->notifySent = 0;
 
   ncclIntruQueueEnqueue(&planner->collCeTaskQueue, t);
 
