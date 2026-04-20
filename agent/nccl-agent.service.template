@@ -5,6 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+User=__SERVICE_USER__
+Group=__SERVICE_GROUP__
 ExecStart=__AGENT_BIN__
 Restart=always
 RestartSec=1

@@ -122,6 +122,10 @@ make -j MPI=1 MPI_HOME=<path-to-mpi> NCCL_HOME=<path-to-this-repo>/build
 - 执行 `daemon-reload`
 - 启用并重启服务
 
+**默认建议将 service 用户配置为和 NCCL 运行用户一致，或者至少确保 NCCL 运行用户对 `/tmp/nccl-agent.sock` 有写权限。**
+- 当前部署脚本默认使用 `root:root`
+- 可以通过 `--service-user` 和 `--service-group` 显式指定运行用户
+
 最简单的部署方式：
 
 ```bash
@@ -134,12 +138,24 @@ sudo bash agent/install_systemd.sh
 sudo bash agent/install_systemd.sh --server-host <remote-host-url> --server-port <remote-port>
 ```
 
+如果需要让 agent 以和 NCCL 相同的用户运行：
+
+```bash
+sudo bash agent/install_systemd.sh \
+  --server-host <remote-host-url> \
+  --server-port <remote-port> \
+  --service-user <nccl-run-user> \
+  --service-group <nccl-run-group>
+```
+
 自定义服务名和安装路径：
 
 ```bash
 sudo bash agent/install_systemd.sh \
   --server-host <remote-host-url> \
   --server-port <remote-port> \
+  --service-user <service-user> \
+  --service-group <service-group> \
   --service-name nccl-agent-custom \
   --install-bin /usr/local/bin/nccl-agent-custom
 ```

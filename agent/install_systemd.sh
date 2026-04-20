@@ -10,6 +10,8 @@ BUILD_DIR="${REPO_ROOT}/build-systemd-agent"
 INSTALL_BIN="/usr/local/bin/nccl-agent"
 SERVICE_NAME="nccl-agent"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+SERVICE_USER="root"
+SERVICE_GROUP="root"
 
 usage() {
   cat <<EOF
@@ -22,10 +24,12 @@ Options:
   --build-dir DIR      Temporary build directory, default: ${BUILD_DIR}
   --install-bin PATH   Installed binary path, default: ${INSTALL_BIN}
   --service-name NAME  systemd service name, default: ${SERVICE_NAME}
+  --service-user USER  systemd service user, default: ${SERVICE_USER}
+  --service-group GRP  systemd service group, default: ${SERVICE_GROUP}
   -h, --help           Show this help
 
 Example:
-  sudo $(basename "$0") --server-host 10.0.0.8 --server-port 19090
+  sudo $(basename "$0") --server-host 10.0.0.8 --server-port 19090 --service-user zhiyuanzhou --service-group zhiyuanzhou
 EOF
 }
 
@@ -60,6 +64,14 @@ parse_args() {
         SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
         shift 2
         ;;
+      --service-user)
+        SERVICE_USER="$2"
+        shift 2
+        ;;
+      --service-group)
+        SERVICE_GROUP="$2"
+        shift 2
+        ;;
       -h|--help)
         usage
         exit 0
@@ -87,10 +99,14 @@ install_binary() {
 }
 
 install_service() {
-  local escaped_bin
+  local escaped_bin escaped_user escaped_group
   escaped_bin="$(printf '%s\n' "${INSTALL_BIN}" | sed 's/[\/&]/\\&/g')"
+  escaped_user="$(printf '%s\n' "${SERVICE_USER}" | sed 's/[\/&]/\\&/g')"
+  escaped_group="$(printf '%s\n' "${SERVICE_GROUP}" | sed 's/[\/&]/\\&/g')"
   echo "installing systemd unit to ${SERVICE_FILE}"
-  sed "s/__AGENT_BIN__/${escaped_bin}/g" \
+  sed -e "s/__AGENT_BIN__/${escaped_bin}/g" \
+      -e "s/__SERVICE_USER__/${escaped_user}/g" \
+      -e "s/__SERVICE_GROUP__/${escaped_group}/g" \
     "${SCRIPT_DIR}/nccl-agent.service.template" > "${SERVICE_FILE}"
 }
 
@@ -109,6 +125,7 @@ show_status() {
   echo "service: ${SERVICE_NAME}"
   echo "binary : ${INSTALL_BIN}"
   echo "target : ${SERVER_HOST}:${SERVER_PORT}"
+  echo "user   : ${SERVICE_USER}:${SERVICE_GROUP}"
   echo
   echo "use these commands to inspect it:"
   echo "  systemctl status ${SERVICE_NAME}"
